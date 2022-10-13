@@ -1,0 +1,113 @@
+# ================================ Customizable Settings ================================
+# ================================================================
+# Hide Rate(s) for PO Box addresses
+#
+# If the shipping address contains any of the entered "PO Box"
+# identifiers, the entered rate(s) are hidden.
+#
+#   - 'po_box_triggers' is a list of possible strings for a PO
+#     Box address
+#   - 'rate_match_type' determines whether the below strings
+#     should be an exact or partial match. Can be:
+#       - ':exact' for an exact match
+#       - ':partial' for a partial match
+#       - ':all' for all rates
+#   - 'rate_names' is a list of rates to show/hide if the above
+#     conditions are met
+# ================================================================
+HIDE_RATES_FOR_PO_BOX = [
+  {
+    po_box_triggers: [
+      "po box", "post office", "p o box", "p.o.box", "p.o. box", "p.o box", "pobox",
+      "post office box", "post box", "p. o. box", "po. box", "postal box", "PO BOX", "POST OFFICE", "P O BOX", "P.O.BOX", "P.O. BOX", "P.O BOX", "POBOX",
+      "POST OFFICE BOX", "POST BOX", "P. O. BOX", "PO. BOX", "POSTAL BOX", "PO Box",
+    ],
+    rate_match_type: :exact,
+    rate_names: ["Ground Shipping (3-6 days)", "Expedited Shipping (2 days)", "Express Shipping (1 day)"],
+  },
+]
+
+# ================================ Script Code (do not edit) ================================
+# ================================================================
+# AddressSelector
+#
+# Finds whether the supplied address contains any of the entered
+# strings.
+# ================================================================
+class AddressSelector
+  def initialize(triggers)
+    @triggers = triggers.map { |trigger| trigger.downcase.strip }
+  end
+
+  def match?(address)
+    address_fields = [address.address1, address.address2].map do |line|
+      line.nil? ? "" : line.downcase
+    end
+
+    address_fields = address_fields.join(" ")
+    @triggers.any? { |trigger| address_fields.include?(trigger) }
+  end
+end
+
+# ================================================================
+# RateNameSelector
+#
+# Finds whether the supplied rate name matches any of the entered
+# names.
+# ================================================================
+class RateNameSelector
+  def initialize(match_type, rate_names)
+    @match_type = match_type
+    @comparator = match_type == :exact ? '==' : 'include?'
+    @rate_names = rate_names.map { |rate_name| rate_name.downcase.strip }
+  end
+
+  def match?(shipping_rate)
+    if @match_type == :all
+      true
+    else
+      @rate_names.any? { |name| shipping_rate.name.downcase.send(@comparator, name) }
+    end
+  end
+end
+
+# ================================================================
+# HideRatesForPOBoxCampaign
+#
+# If the shipping address contains any of the entered "PO Box"
+# identifiers, the entered rate(s) are hidden.
+# ================================================================
+class HideRatesForPOBoxCampaign
+  def initialize(campaigns)
+    @campaigns = campaigns
+  end
+
+  def run(cart, shipping_rates)
+    address = cart.shipping_address
+
+    return if address.nil?
+
+    @campaigns.each do |campaign|
+      next unless AddressSelector.new(campaign[:po_box_triggers]).match?(address)
+
+      rate_name_selector = RateNameSelector.new(
+        campaign[:rate_match_type],
+        campaign[:rate_names],
+      )
+
+      shipping_rates.delete_if do |shipping_rate|
+        rate_name_selector.match?(shipping_rate)
+      end
+    end
+  end
+end
+
+CAMPAIGNS = [
+  HideRatesForPOBoxCampaign.new(HIDE_RATES_FOR_PO_BOX),
+]
+
+CAMPAIGNS.each do |campaign|
+  campaign.run(Input.cart, Input.shipping_rates)
+end
+
+Output.shipping_rates = Input.shipping_rates
